@@ -16,6 +16,8 @@ class PaymentTransaction(models.Model):
                                            help="Response code returned by CyberSource API")
     cybersource_response_message = fields.Char(string="CyberSource Response Message",
                                               help="Message returned by CyberSource API")
+    cybersource_device_fingerprint = fields.Char(string="Device Fingerprint",
+                                               help="Device fingerprint ID used for fraud detection")
 
     def action_cybersource_set_done(self):
         """ Set the state of the transaction to 'done'."""
@@ -74,6 +76,11 @@ class PaymentTransaction(models.Model):
         # Store CyberSource specific data
         self.cybersource_response_code = notification_data.get('cybersource_status', '')
         self.cybersource_response_message = notification_data.get('message', '')
+        
+        # Store device fingerprint if provided
+        if notification_data.get('device_fingerprint'):
+            self.cybersource_device_fingerprint = notification_data.get('device_fingerprint')
+            _logger.info("Stored device fingerprint: %s", self.cybersource_device_fingerprint)
         
         # Log transaction details for debugging
         _logger.info(

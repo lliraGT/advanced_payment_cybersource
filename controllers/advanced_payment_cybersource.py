@@ -62,12 +62,15 @@ class WebsiteSaleFormCyberSource(http.Controller):
             cavv="AAABCSIIAAAAAAACcwgAEMCoNh+=",
             xid="T1Y0OVcxMVJJdkI0WFlBcXptUzE=")
             
-        # Add device fingerprint if provided
+        # Add device fingerprint 
         device_fingerprint = post.get('customer_input').get('device_fingerprint', '')
+        _logger.info("Using device fingerprint: %s", device_fingerprint)
+        
+        # Create device information object with fingerprint
         device_information = Ptsv2paymentsDeviceInformation(
             fingerprint_session_id=device_fingerprint)
             
-        # Create the request object with all parameters
+        # Create the request object with all parameters including device info
         request_obj = CreatePaymentRequest(
             client_reference_information=client_reference_information.__dict__,
             processing_information=processing_information.__dict__,
@@ -77,6 +80,17 @@ class WebsiteSaleFormCyberSource(http.Controller):
             device_information=device_information.__dict__)
             
         request_obj = self.del_none(request_obj.__dict__)
+        
+        # Log the complete request (with masked sensitive data)
+        masked_request = dict(request_obj)
+        if 'payment_information' in masked_request and 'tokenized_card' in masked_request['payment_information']:
+            if 'number' in masked_request['payment_information']['tokenized_card']:
+                masked_request['payment_information']['tokenized_card']['number'] = 'XXXX' + masked_request['payment_information']['tokenized_card']['number'][-4:]
+            if 'security_code' in masked_request['payment_information']['tokenized_card']:
+                masked_request['payment_information']['tokenized_card']['security_code'] = 'XXX'
+        
+        _logger.info("CyberSource request data: %s", json.dumps(masked_request))
+        
         request_obj = json.dumps(request_obj)
         
         try:
@@ -125,6 +139,7 @@ class WebsiteSaleFormCyberSource(http.Controller):
                     'simulated_state': transaction_state,  # This is what Odoo will use
                     'cybersource_status': cybersource_status,  # Store the original status
                     'manual_capture': False,  # Set to True for manual capture if needed
+                    'device_fingerprint': device_fingerprint,  # Store the device fingerprint
                 }
                 
                 # Process the transaction with the data

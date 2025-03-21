@@ -25,13 +25,14 @@
                 <button string="Set to Error"
                         type="object"
                         name="action_cybersource_set_error"
-                        invisible="provider_code != 'demo' or state != 'pending'"/>
+                        invisible="provider_code != 'cybersource' or state != 'pending'"/>
             </header>
             
             <!-- Add CyberSource response details to the transaction form -->
             <field name="provider_code" position="after">
                 <field name="cybersource_response_code" invisible="provider_code != 'cybersource'"/>
                 <field name="cybersource_response_message" invisible="provider_code != 'cybersource'"/>
+                <field name="cybersource_device_fingerprint" invisible="provider_code != 'cybersource'"/>
             </field>
         </field>
     </record>
