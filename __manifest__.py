@@ -44,6 +44,7 @@
     'assets': {
         'web.assets_frontend': [
             '/advanced_payment_cybersource/static/src/js/payment_form.js',
+            '/advanced_payment_cybersource/static/src/js/device_fingerprint.js',
         ],
     },
     'external_dependencies': {

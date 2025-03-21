@@ -1,27 +1,9 @@
 # -*- coding: utf-8 -*-
-###############################################################################
-#
-#    Cybrosys Technologies Pvt. Ltd.
-#
-#    Copyright (C) 2024-TODAY Cybrosys Technologies(<https://www.cybrosys.com>)
-#    Author: Cybrosys Techno Solutions(<https://www.cybrosys.com>)
-#
-#    You can modify it under the terms of the GNU LESSER
-#    GENERAL PUBLIC LICENSE (LGPL v3), Version 3.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU LESSER GENERAL PUBLIC LICENSE (LGPL v3) for more details.
-#
-#    You should have received a copy of the GNU LESSER GENERAL PUBLIC LICENSE
-#    (LGPL v3) along with this program.
-#    If not, see <http://www.gnu.org/licenses/>.
-#
-###############################################################################
 from odoo import api, fields, models, _
 from odoo.exceptions import ValidationError
+import logging
 
+_logger = logging.getLogger(__name__)
 
 class PaymentTransaction(models.Model):
     """ Inherits payment.transaction """
@@ -30,17 +12,23 @@ class PaymentTransaction(models.Model):
     capture_manually = fields.Boolean(related='provider_id.capture_manually',
                                       string="Capture Manually",
                                       help='Enable manual capturing')
+    cybersource_response_code = fields.Char(string="CyberSource Response Code", 
+                                           help="Response code returned by CyberSource API")
+    cybersource_response_message = fields.Char(string="CyberSource Response Message",
+                                              help="Message returned by CyberSource API")
+    cybersource_device_fingerprint = fields.Char(string="Device Fingerprint",
+                                               help="Device fingerprint ID used for fraud detection")
 
     def action_cybersource_set_done(self):
-        """ Set the state of the demo transaction to 'done'."""
+        """ Set the state of the transaction to 'done'."""
         self.handle_notification()
 
     def action_cybersource_set_canceled(self):
-        """Set the state of the demo transaction to 'cancel'"""
+        """Set the state of the transaction to 'cancel'"""
         self.handle_notification()
 
     def action_cybersource_set_error(self):
-        """Set the state of the demo transaction to 'error'"""
+        """Set the state of the transaction to 'error'"""
         self.handle_notification()
 
     def handle_notification(self):
@@ -82,23 +70,55 @@ class PaymentTransaction(models.Model):
         super()._process_notification_data(notification_data)
         if self.provider_code != 'cybersource':
             return
+            
         self.provider_reference = f'cybersource-{self.reference}'
-        state = notification_data['simulated_state']
-        if state == 'pending':
-            self._set_pending()
-        elif state == 'AUTHORIZED':
-            if self.capture_manually and not notification_data.get(
-                    'manual_capture'):
+        
+        # Store CyberSource specific data
+        self.cybersource_response_code = notification_data.get('cybersource_status', '')
+        self.cybersource_response_message = notification_data.get('message', '')
+        
+        # Store device fingerprint if provided
+        if notification_data.get('device_fingerprint'):
+            self.cybersource_device_fingerprint = notification_data.get('device_fingerprint')
+            _logger.info("Stored device fingerprint: %s", self.cybersource_device_fingerprint)
+        
+        # Log transaction details for debugging
+        _logger.info(
+            "Processing CyberSource transaction %s with state: %s, status: %s", 
+            self.reference,
+            notification_data.get('simulated_state', ''),
+            notification_data.get('cybersource_status', '')
+        )
+        
+        # Process based on the simulated_state sent from the controller
+        state = notification_data.get('simulated_state')
+        
+        if state == 'done':
+            # Transaction is successful - either automatically capture or set as authorized
+            if self.capture_manually and not notification_data.get('manual_capture'):
+                _logger.info("Setting transaction %s to authorized", self.reference)
                 self._set_authorized()
             else:
+                _logger.info("Setting transaction %s to done", self.reference)
                 self._set_done()
                 if self.operation == 'refund':
-                    self.env.ref(
-                        'payment.cron_post_process_payment_tx')._trigger()
-        elif state == 'DECLINED':
-            message = notification_data.get('message', 'No message provided')
-            self._set_canceled(
-                state_message=f"Payment canceled due to: {message}")
+                    self.env.ref('payment.cron_post_process_payment_tx')._trigger()
+        elif state == 'pending':
+            _logger.info("Setting transaction %s to pending", self.reference)
+            self._set_pending()
+        elif state == 'cancel':
+            _logger.info("Setting transaction %s to canceled", self.reference)
+            self._set_canceled(state_message=f"Payment was declined: {notification_data.get('message', 'No message')}")
+        elif state == 'error':
+            _logger.info("Setting transaction %s to error", self.reference)
+            self._set_error(_(
+                "Payment processing error: %s", 
+                notification_data.get('message', 'Unknown error')
+            ))
         else:
-            self._set_error(
-                _("You selected the following payment status: %s", state))
+            # Default case - should not reach here with proper controller response handling
+            _logger.warning(
+                "Unknown transaction state '%s' for CyberSource transaction %s", 
+                state, self.reference
+            )
+            self._set_error(_("Unexpected payment status"))
