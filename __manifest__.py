@@ -21,7 +21,7 @@
 ###############################################################################
 {
     'name': 'Odoo CyberSource Payment Gateway',
-    'version': '17.0.1.0.0',
+    'version': '17.0.1.0.2',
     'category': 'eCommerce ',
     'summary': """Make payments using Cybersource payment provider from website
     shop.""",
@@ -46,7 +46,7 @@
             # Load payment form normally
             '/advanced_payment_cybersource/static/src/js/payment_form.js',
         ],
-        # Load device fingerprint script separately to avoid module system
+        # Load device fingerprint script separately to ensure it's loaded early
         'web.assets_frontend_minimal_js': [
             '/advanced_payment_cybersource/static/src/js/device_fingerprint.js',
         ],

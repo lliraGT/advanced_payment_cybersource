@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
+    <!-- Update the existing inline_form template to include device fingerprint script -->
     <template id="inline_form">
         <div t-attf-id="demo-container-{{provider_id}}">
+            <!-- Hidden field to store device fingerprint -->
+            <input type="hidden" name="device_fingerprint" id="customer_device_fingerprint" />
+            
             <div id="card_details">
                 <div class="mb-3">
                     <input name="provider_id" type="hidden" id="pay_provider_id" t-att-value="id"/>
@@ -36,5 +40,25 @@
                 </div>
             </div>
         </div>
+    </template>
+    
+    <!-- Add a template to inject the device fingerprint script in the checkout page -->
+    <template id="cybersource_device_fingerprint" inherit_id="website_sale.address">
+        <xpath expr="//div[hasclass('oe_cart')]" position="before">
+            <t t-if="website_sale_order and website_sale_order.website_order_line">
+                <div id="cybersource_df_container" class="d-none">
+                    <!-- This div is hidden but will contain dynamically added device fingerprint code -->
+                </div>
+            </t>
+        </xpath>
+    </template>
+    
+    <!-- Also add the device fingerprint script to the payment page -->
+    <template id="cybersource_device_fingerprint_payment" inherit_id="website_sale.payment">
+        <xpath expr="//div[@id='payment_method']" position="before">
+            <div id="cybersource_df_container" class="d-none">
+                <!-- This div is hidden but will contain dynamically added device fingerprint code -->
+            </div>
+        </xpath>
     </template>
 </odoo>

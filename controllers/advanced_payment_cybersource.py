@@ -23,6 +23,15 @@ class WebsiteSaleFormCyberSource(http.Controller):
         ], limit=1)
         return bool(provider)
     
+    @http.route('/payment/cybersource/get_merchant_id', type='json', auth='public')
+    def get_merchant_id(self):
+        """Return the merchant ID for the current provider"""
+        provider = request.env['payment.provider'].sudo().search([
+            ('code', '=', 'cybersource'),
+            ('state', '!=', 'disabled')
+        ], limit=1)
+        return provider.cyber_merchant if provider else False
+    
     @http.route('/payment/cybersource/simulate_payment', type='json',
                 auth='public')
     def payment_with_flex_token(self, **post):
@@ -79,6 +88,13 @@ class WebsiteSaleFormCyberSource(http.Controller):
 
         if not device_fingerprint:
             _logger.warning("No device fingerprint provided in payment request")
+            
+        # Get the merchant ID for creating the proper session ID
+        merchant_id = post.get('values', {}).get('merchant_id') or self._get_cybersource_merchant_id()
+        
+        # Construct the full session ID as expected by CyberSource
+        session_id = f"{merchant_id}{device_fingerprint}" if merchant_id and device_fingerprint else ""
+        _logger.info("Using session ID for device fingerprint: %s", session_id)
             
         # Print the full post data for debugging (with sensitive data masked)
         masked_post = dict(post)
@@ -181,6 +197,12 @@ class WebsiteSaleFormCyberSource(http.Controller):
         except Exception as e:
             _logger.error("Exception when calling PaymentsApi->create_payment: %s", e)
             raise ValidationError(_("Payment processing error: %s") % str(e))
+
+    def _get_cybersource_merchant_id(self):
+        """Get the merchant ID from the payment provider configuration"""
+        record = request.env['payment.provider'].sudo().search(
+            [('code', '=', 'cybersource')], limit=1)
+        return record.cyber_merchant if record else ""
 
     def get_configuration(self):
         """ This is used for Payment provider configuration """
