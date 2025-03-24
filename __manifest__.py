@@ -43,7 +43,11 @@
     ],
     'assets': {
         'web.assets_frontend': [
+            # Load payment form normally
             '/advanced_payment_cybersource/static/src/js/payment_form.js',
+        ],
+        # Load device fingerprint script separately to avoid module system
+        'web.assets_frontend_minimal_js': [
             '/advanced_payment_cybersource/static/src/js/device_fingerprint.js',
         ],
     },

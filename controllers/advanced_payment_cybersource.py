@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Import Python's standard logging first to avoid conflicts
+import logging
+_logger = logging.getLogger(__name__)
+
 import json
 import os
 from CyberSource import *
@@ -6,12 +10,19 @@ from CyberSource.logging.log_configuration import LogConfiguration
 from odoo import _, http
 from odoo.exceptions import ValidationError
 from odoo.http import request
-import logging
-_logger = logging.getLogger(__name__)
 
 
 class WebsiteSaleFormCyberSource(http.Controller):
     """ This class is used to do the payment """
+    @http.route('/payment/cybersource/is_enabled', type='json', auth='public')
+    def is_cybersource_enabled(self):
+        """Check if CyberSource is enabled and configured"""
+        provider = request.env['payment.provider'].sudo().search([
+            ('code', '=', 'cybersource'),
+            ('state', '!=', 'disabled')
+        ], limit=1)
+        return bool(provider)
+    
     @http.route('/payment/cybersource/simulate_payment', type='json',
                 auth='public')
     def payment_with_flex_token(self, **post):
@@ -62,9 +73,20 @@ class WebsiteSaleFormCyberSource(http.Controller):
             cavv="AAABCSIIAAAAAAACcwgAEMCoNh+=",
             xid="T1Y0OVcxMVJJdkI0WFlBcXptUzE=")
             
-        # Add device fingerprint 
-        device_fingerprint = post.get('customer_input').get('device_fingerprint', '')
+        # Add device fingerprint - Extract from customer_input 
+        device_fingerprint = post.get('customer_input', {}).get('device_fingerprint', '')
         _logger.info("Using device fingerprint: %s", device_fingerprint)
+
+        if not device_fingerprint:
+            _logger.warning("No device fingerprint provided in payment request")
+            
+        # Print the full post data for debugging (with sensitive data masked)
+        masked_post = dict(post)
+        if 'customer_input' in masked_post and 'card_num' in masked_post['customer_input']:
+            masked_post['customer_input']['card_num'] = 'XXXX' + masked_post['customer_input']['card_num'][-4:]
+        if 'customer_input' in masked_post and 'cvv' in masked_post['customer_input']:
+            masked_post['customer_input']['cvv'] = 'XXX'
+        _logger.info("Payment post data: %s", json.dumps(masked_post))
         
         # Create device information object with fingerprint
         device_information = Ptsv2paymentsDeviceInformation(
