@@ -1,96 +1,155 @@
-/** @odoo-module */
-// File: static/src/js/device_fingerprint.js
-
-/**
- * CyberSource Device Fingerprint implementation
- * This script loads the ThreatMetrix service to collect device fingerprint data
- * which will be used during payment processing for fraud detection
- */
-
-// Self-executing function to avoid polluting global namespace
+/* Standalone CyberSource device fingerprint integration */
 (function() {
-    "use strict";
-
-    // Configuration: Change these values based on environment
-    const TEST_ORG_ID = "1snn5n9w";
-    const PROD_ORG_ID = "k8vif92e";
+    // Run when DOM is ready
+    document.addEventListener('DOMContentLoaded', function() {
+        setupDeviceFingerprint();
+    });
     
-    // Determine which org_id to use based on environment
-    // You can modify this logic to detect environment - this example uses a simple URL check
-    const isProduction = window.location.hostname.indexOf('test') === -1 
-                        && window.location.hostname.indexOf('dev') === -1
-                        && window.location.hostname.indexOf('staging') === -1;
-    const orgId = isProduction ? PROD_ORG_ID : TEST_ORG_ID;
-
-    /**
-     * Generate a device fingerprint and store it
-     * @returns {String} The device fingerprint ID
-     */
-    function generateDeviceFingerprint() {
-        // Generate a unique ID for this session (use transaction reference if available)
-        // or generate a timestamp-based ID if no transaction reference exists
-        let deviceFingerprint;
+    // Fallback for jQuery ready
+    if (typeof jQuery !== 'undefined') {
+        jQuery(document).ready(function() {
+            setupDeviceFingerprint();
+        });
+    }
+    
+    function setupDeviceFingerprint() {
+        // Find container
+        var container = document.getElementById('cybersource_df_container');
+        if (!container) return;
         
-        // Try to get from the page if it exists (transaction reference)
-        const orderReference = document.querySelector('input[name="reference"]')?.value;
+        // Generate fingerprint
+        var fingerprint = generateFingerprint();
         
-        if (orderReference) {
-            // Use order reference as part of fingerprint
-            deviceFingerprint = orderReference.replace(/\D/g, ''); // Keep only numbers
-        } else {
-            // Generate a numeric ID based on timestamp
-            deviceFingerprint = Math.floor(Date.now() / 100).toString().slice(-10);
+        // Default merchant ID
+        var merchantId = 'visanetgt_kani';
+        
+        // Check for merchant ID in form
+        var merchantField = document.querySelector('[name="merchant_id"]');
+        if (merchantField && merchantField.value) {
+            merchantId = merchantField.value;
         }
         
-        // Store the fingerprint for later use
-        localStorage.setItem('cybersource_device_fingerprint', deviceFingerprint);
-        window.cybersourceFingerprint = deviceFingerprint;
+        // Create session ID (merchantID + fingerprint)
+        var sessionId = merchantId + fingerprint;
         
-        return deviceFingerprint;
-    }
-
-    /**
-     * Load the ThreatMetrix script with proper session ID
-     */
-    function loadDeviceFingerprintScript() {
-        const deviceFingerprint = generateDeviceFingerprint();
+        // Test environment org_id (1snn5n9w for test, k8vif92e for production)
+        var orgId = '1snn5n9w';
         
-        // Get merchant ID from the page if possible, or use a default
-        let merchantId = "visanetgt_kani"; // Default value, customize as needed
-        
-        // Create the session ID by combining merchant ID and device fingerprint
-        const sessionId = merchantId + deviceFingerprint;
-        
-        // Create and append the ThreatMetrix script to the head
-        const script = document.createElement('script');
+        // Add script to head (as required in PDF)
+        var script = document.createElement('script');
         script.type = 'text/javascript';
-        script.src = `https://h.online-metrix.net/fp/tags.js?org_id=${orgId}&session_id=${sessionId}`;
+        script.src = 'https://h.online-metrix.net/fp/tags.js?org_id=' + orgId + '&session_id=' + sessionId;
         document.head.appendChild(script);
         
-        // Add the noscript iframe fallback to the body
-        const noscriptContent = document.createElement('div');
-        noscriptContent.innerHTML = `
-            <noscript>
-                <iframe style="width: 100px; height: 100px; border: 0; position:absolute; top: -5000px;" 
-                        src="https://h.online-metrix.net/fp/tags?org_id=${orgId}&session_id=${sessionId}">
-                </iframe>
-            </noscript>
-        `;
+        // Add iframe inside noscript tag (as required in PDF)
+        container.innerHTML = 
+            '<noscript>' +
+            '<iframe style="width: 100px; height: 100px; border: 0; position: absolute; top: -5000px;" ' +
+            'src="https://h.online-metrix.net/fp/tags?org_id=' + orgId + '&session_id=' + sessionId + '">' +
+            '</iframe>' +
+            '</noscript>';
         
-        // Append to body when DOM is ready
-        if (document.body) {
-            document.body.appendChild(noscriptContent);
-        } else {
-            // If body isn't ready yet, wait for DOMContentLoaded
-            document.addEventListener('DOMContentLoaded', function() {
-                document.body.appendChild(noscriptContent);
-            });
-        }
+        // Show container
+        container.style.display = 'block';
         
-        console.log(`CyberSource Device Fingerprint initialized: ${deviceFingerprint}`);
-        return deviceFingerprint;
+        console.log('CyberSource device fingerprint: ' + fingerprint);
     }
     
-    // Initialize as soon as possible
-    loadDeviceFingerprintScript();
+    function generateFingerprint() {
+        // Try to get the order reference from the page
+        var orderReference = findOrderReference();
+        var fingerprint;
+        
+        if (orderReference) {
+            // Extract numeric part if it starts with S
+            var numericPart = orderReference;
+            if (orderReference.startsWith('S')) {
+                numericPart = orderReference.substring(1);
+            }
+            
+            // Add date prefix YYMMDD
+            var date = new Date();
+            var datePrefix = 
+                String(date.getFullYear()).substring(2) + 
+                String(date.getMonth() + 1).padStart(2, '0') + 
+                String(date.getDate()).padStart(2, '0');
+            
+            // Combine date + order ID, ensure it's at least 10 digits
+            fingerprint = datePrefix + numericPart;
+            // Truncate if longer than 10 digits
+            if (fingerprint.length > 10) {
+                fingerprint = fingerprint.substring(0, 10);
+            }
+            // Pad with zeros if shorter than 10 digits
+            while (fingerprint.length < 10) {
+                fingerprint = fingerprint + '0';
+            }
+        } else {
+            // Fallback to date + random if no order reference found
+            var date = new Date();
+            var datePart = 
+                String(date.getFullYear()).substring(2) + 
+                String(date.getMonth() + 1).padStart(2, '0') + 
+                String(date.getDate()).padStart(2, '0');
+            
+            var randomPart = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+            fingerprint = datePart + randomPart;
+        }
+        
+        // Store in window for form access
+        window.cybersourceFingerprint = fingerprint;
+        
+        // Update any hidden fields
+        var fields = document.querySelectorAll('[name="device_fingerprint"], #customer_device_fingerprint');
+        for (var i = 0; i < fields.length; i++) {
+            fields[i].value = fingerprint;
+        }
+        
+        return fingerprint;
+    }
+    
+    function findOrderReference() {
+        // Try different methods to find order reference
+        
+        // Method 1: Look for an element containing the reference in specific places
+        var referenceEl = document.querySelector('.reference');
+        if (referenceEl && referenceEl.textContent) {
+            return referenceEl.textContent.trim();
+        }
+        
+        // Method 2: Try to extract from URL if present
+        var urlMatch = window.location.pathname.match(/\/orders\/([^\/]+)/);
+        if (urlMatch && urlMatch[1]) {
+            return urlMatch[1];
+        }
+        
+        // Method 3: Look for hidden input with reference
+        var refInput = document.querySelector('input[name="reference"]');
+        if (refInput && refInput.value) {
+            return refInput.value;
+        }
+        
+        // Method 4: Look for specific data in payment form
+        var paymentForm = document.querySelector('form.payment_form, form.o_payment_form');
+        if (paymentForm) {
+            var txEl = paymentForm.querySelector('[data-reference]');
+            if (txEl && txEl.dataset.reference) {
+                return txEl.dataset.reference;
+            }
+        }
+        
+        // Method 5: Check URL parameters
+        var urlParams = new URLSearchParams(window.location.search);
+        var refParam = urlParams.get('reference');
+        if (refParam) {
+            return refParam;
+        }
+        
+        // Method 6: Try to get the payment transaction reference
+        if (typeof odoo !== 'undefined' && odoo.session_info && odoo.session_info.sale_order) {
+            return odoo.session_info.sale_order.name;
+        }
+        
+        return null;
+    }
 })();

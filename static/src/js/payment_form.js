@@ -10,56 +10,28 @@ paymentForm.include({
      * @returns {String} The device fingerprint ID
      */
     _getDeviceFingerprint() {
-        // Try from window variable first
+        // Try from window variable first (set by device_fingerprint.js)
         if (window.cybersourceFingerprint) {
             return window.cybersourceFingerprint;
         }
         
-        // Try from localStorage
+        // Try from form field
+        const fingerprintInput = document.getElementById('customer_device_fingerprint');
+        if (fingerprintInput && fingerprintInput.value) {
+            return fingerprintInput.value;
+        }
+        
+        // Try from localStorage as fallback
         const storedFingerprint = localStorage.getItem('cybersource_device_fingerprint');
         if (storedFingerprint) {
-            // If stored fingerprint is not numeric, convert it
-            if (!/^\d+$/.test(storedFingerprint)) {
-                // Create a numeric ID
-                const numericId = Math.floor(Date.now() / 100).toString().slice(-10);
-                localStorage.setItem('cybersource_device_fingerprint', numericId);
-                console.log('Converted to numeric fingerprint:', numericId);
-                return numericId;
-            }
             return storedFingerprint;
         }
         
-        // If nothing found, generate a new numeric ID from reference if possible
-        const reference = this.txContext?.reference;
-        if (reference) {
-            // Extract numeric portion or generate a fallback
-            const numericId = reference.replace(/\D/g, '') || Math.floor(Date.now() / 100).toString().slice(-10);
-            localStorage.setItem('cybersource_device_fingerprint', numericId);
-            console.log('Generated fingerprint from reference:', numericId);
-            return numericId;
-        }
-        
-        // Final fallback - generate a numeric ID
-        const numericId = Math.floor(Date.now() / 100).toString().slice(-10);
+        // Last resort - generate a new ID
+        const numericId = Math.floor(Math.random() * 10000000000).toString().padStart(10, '0');
         localStorage.setItem('cybersource_device_fingerprint', numericId);
-        console.log('Generated new numeric fingerprint:', numericId);
+        console.log('Generated new device fingerprint:', numericId);
         return numericId;
-    },
-
-    /**
-     * Get the merchant ID from the provider or use default
-     * @returns {String} The merchant ID
-     */
-    _getMerchantId() {
-        // Try to get merchant ID from the DOM or context
-        const merchantInput = document.querySelector('[name="merchant_id"]');
-        if (merchantInput && merchantInput.value) {
-            return merchantInput.value;
-        }
-        
-        // If we can't find it, use a default
-        // This should be updated with the actual merchant ID
-        return "visanetgt_kani";
     },
 
     /**
@@ -70,7 +42,8 @@ paymentForm.include({
             return this._super(...arguments);
         }
         
-        var customerInputNumber = $('#customer_input_number').val();
+        // Extract form values
+        const customerInputNumber = $('#customer_input_number').val();
         const customerInputName = $('#customer_input_name').val();
         const expMonth = $('#customer_input_month').val();
         const expYear = $('#customer_input_year').val();
@@ -80,23 +53,30 @@ paymentForm.include({
         const deviceFingerprint = this._getDeviceFingerprint();
         console.log("Processing payment with device fingerprint:", deviceFingerprint);
         
-        // Update hidden field if it exists
-        const fingerprintInput = document.getElementById('customer_device_fingerprint');
-        if (fingerprintInput) {
-            fingerprintInput.value = deviceFingerprint;
-        }
-        
         // Form validation
-        if(customerInputNumber == "") {
+        if(!customerInputNumber) {
             this._displayErrorDialog(
-                _t("Server Error"),
-                _t("We are not able to process your payment Card Number not entered")
+                _t("Validation Error"),
+                _t("Please enter your card number")
             );
             return;
         }
         
-        // Additional validation...
-        // [rest of validation code omitted for brevity]
+        if(!expMonth || !expYear) {
+            this._displayErrorDialog(
+                _t("Validation Error"),
+                _t("Please enter card expiration date")
+            );
+            return;
+        }
+        
+        if(!cvv) {
+            this._displayErrorDialog(
+                _t("Validation Error"),
+                _t("Please enter card security code (CVV)")
+            );
+            return;
+        }
         
         // Process the payment
         return jsonrpc(
@@ -111,12 +91,11 @@ paymentForm.include({
                     'cvv': cvv,
                     'device_fingerprint': deviceFingerprint
                 },
-                'values':{
+                'values': {
                     'amount': processingValues.amount,
                     'currency': processingValues.currency_id,
                     'partner': processingValues.partner_id,
-                    'order': processingValues.reference,
-                    'merchant_id': this._getMerchantId()
+                    'order': processingValues.reference
                 },
             },
         ).then(() => window.location = '/payment/status')
@@ -124,7 +103,7 @@ paymentForm.include({
             console.error("Payment processing error:", error);
             this._displayErrorDialog(
                 _t("Payment Error"),
-                _t("An error occurred while processing your payment: ") + (error.message || "Unknown error")
+                _t("An error occurred while processing your payment. Please try again.")
             );
         });
     },
