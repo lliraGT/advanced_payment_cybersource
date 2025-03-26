@@ -78,6 +78,35 @@ paymentForm.include({
             return;
         }
         
+        // Check if we're in payment link mode
+        const isPaymentLink = window.location.pathname.includes('/payment/pay');
+        
+        // Get the sale order ID from URL if in payment link mode
+        let values = {
+            'amount': processingValues.amount,
+            'currency': processingValues.currency_id,
+            'partner': processingValues.partner_id,
+            'order': processingValues.reference
+        };
+        
+        if (isPaymentLink) {
+            // Try to get the sale_order_id from URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const orderParam = urlParams.get('sale_order_id');
+            if (orderParam) {
+                values.sale_order_id = orderParam;
+            }
+            
+            // Get the merchant ID
+            jsonrpc('/payment/cybersource/get_merchant_id').then(merchant_id => {
+                if (merchant_id) {
+                    values.merchant_id = merchant_id;
+                }
+            }).catch(err => {
+                console.error("Failed to get merchant ID:", err);
+            });
+        }
+        
         // Process the payment
         return jsonrpc(
             '/payment/cybersource/simulate_payment',
@@ -91,12 +120,7 @@ paymentForm.include({
                     'cvv': cvv,
                     'device_fingerprint': deviceFingerprint
                 },
-                'values': {
-                    'amount': processingValues.amount,
-                    'currency': processingValues.currency_id,
-                    'partner': processingValues.partner_id,
-                    'order': processingValues.reference
-                },
+                'values': values,
             },
         ).then(() => window.location = '/payment/status')
         .catch(error => {

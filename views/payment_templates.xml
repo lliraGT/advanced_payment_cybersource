@@ -61,4 +61,6 @@
             </div>
         </xpath>
     </template>
+    
+    <!-- We'll use a different approach for payment links since the template ID is different -->
 </odoo>

@@ -13,46 +13,105 @@
     }
     
     function setupDeviceFingerprint() {
-        // Find container
+        // Check if we're on a payment page or payment link page
+        const isPaymentPage = window.location.pathname.includes('/shop/payment') || 
+                              window.location.pathname.includes('/payment/pay');
+        
+        if (!isPaymentPage) {
+            return; // Exit if not on a payment page
+        }
+        
+        // Find existing container or create one for payment links
         var container = document.getElementById('cybersource_df_container');
-        if (!container) return;
+        if (!container) {
+            // Create container for payment links
+            container = document.createElement('div');
+            container.id = 'cybersource_df_container';
+            container.className = 'd-none';
+            
+            // Find a good place to insert the container in payment link page
+            const paymentForm = document.querySelector('form.o_payment_form, form.payment_form, #o_payment_form');
+            if (paymentForm) {
+                // Insert before the form
+                paymentForm.parentNode.insertBefore(container, paymentForm);
+            } else {
+                // Fallback to body if form not found
+                document.body.appendChild(container);
+            }
+        }
         
         // Generate fingerprint
         var fingerprint = generateFingerprint();
         
-        // Default merchant ID
-        var merchantId = 'visanetgt_kani';
-        
-        // Check for merchant ID in form
-        var merchantField = document.querySelector('[name="merchant_id"]');
-        if (merchantField && merchantField.value) {
-            merchantId = merchantField.value;
+        // Try to fetch the merchant ID using AJAX
+        fetchMerchantId(function(merchantId) {
+            // Default merchant ID if fetch fails
+            merchantId = merchantId || 'visanetgt_kani';
+            
+            // Create session ID (merchantID + fingerprint)
+            var sessionId = merchantId + fingerprint;
+            
+            // Test environment org_id (1snn5n9w for test, k8vif92e for production)
+            var orgId = '1snn5n9w';
+            
+            // Add script to head (as required in PDF)
+            var script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = 'https://h.online-metrix.net/fp/tags.js?org_id=' + orgId + '&session_id=' + sessionId;
+            document.head.appendChild(script);
+            
+            // Add iframe inside noscript tag (as required in PDF)
+            container.innerHTML = 
+                '<noscript>' +
+                '<iframe style="width: 100px; height: 100px; border: 0; position: absolute; top: -5000px;" ' +
+                'src="https://h.online-metrix.net/fp/tags?org_id=' + orgId + '&session_id=' + sessionId + '">' +
+                '</iframe>' +
+                '</noscript>';
+            
+            // Show container
+            container.style.display = 'block';
+            
+            console.log('CyberSource device fingerprint initialized: ' + fingerprint);
+            console.log('Session ID: ' + sessionId);
+        });
+    }
+    
+    function fetchMerchantId(callback) {
+        // Try to get the merchant ID from the server
+        if (window.odoo && window.odoo.jsonrpc) {
+            window.odoo.jsonrpc('/payment/cybersource/get_merchant_id', 'call', {})
+                .then(function(result) {
+                    callback(result);
+                })
+                .catch(function(error) {
+                    console.error('Error fetching merchant ID:', error);
+                    callback(null);
+                });
+        } else if (window.fetch) {
+            // Fallback to fetch API if odoo.jsonrpc is not available
+            fetch('/payment/cybersource/get_merchant_id', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    method: 'call',
+                    params: {},
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                callback(data.result);
+            })
+            .catch(error => {
+                console.error('Error fetching merchant ID:', error);
+                callback(null);
+            });
+        } else {
+            // If none of the above methods are available
+            callback(null);
         }
-        
-        // Create session ID (merchantID + fingerprint)
-        var sessionId = merchantId + fingerprint;
-        
-        // Test environment org_id (1snn5n9w for test, k8vif92e for production)
-        var orgId = '1snn5n9w';
-        
-        // Add script to head (as required in PDF)
-        var script = document.createElement('script');
-        script.type = 'text/javascript';
-        script.src = 'https://h.online-metrix.net/fp/tags.js?org_id=' + orgId + '&session_id=' + sessionId;
-        document.head.appendChild(script);
-        
-        // Add iframe inside noscript tag (as required in PDF)
-        container.innerHTML = 
-            '<noscript>' +
-            '<iframe style="width: 100px; height: 100px; border: 0; position: absolute; top: -5000px;" ' +
-            'src="https://h.online-metrix.net/fp/tags?org_id=' + orgId + '&session_id=' + sessionId + '">' +
-            '</iframe>' +
-            '</noscript>';
-        
-        // Show container
-        container.style.display = 'block';
-        
-        console.log('CyberSource device fingerprint: ' + fingerprint);
     }
     
     function generateFingerprint() {
@@ -105,7 +164,28 @@
             fields[i].value = fingerprint;
         }
         
+        // Also add a hidden field to the payment form for payment links
+        addHiddenFingerprintField(fingerprint);
+        
         return fingerprint;
+    }
+    
+    function addHiddenFingerprintField(fingerprint) {
+        // For payment links, add the fingerprint to the payment form
+        const forms = document.querySelectorAll('form.o_payment_form, form.payment_form, #o_payment_form');
+        forms.forEach(form => {
+            // Check if field already exists
+            let field = form.querySelector('[name="device_fingerprint"], #customer_device_fingerprint');
+            if (!field) {
+                // Create new hidden field
+                field = document.createElement('input');
+                field.type = 'hidden';
+                field.name = 'device_fingerprint';
+                field.id = 'customer_device_fingerprint';
+                form.appendChild(field);
+            }
+            field.value = fingerprint;
+        });
     }
     
     function findOrderReference() {
@@ -145,7 +225,13 @@
             return refParam;
         }
         
-        // Method 6: Try to get the payment transaction reference
+        // Method 6: Look for sale_order_id in URL (for payment links)
+        var orderParam = urlParams.get('sale_order_id');
+        if (orderParam) {
+            return 'SO' + orderParam;
+        }
+        
+        // Method 7: Try to get the payment transaction reference
         if (typeof odoo !== 'undefined' && odoo.session_info && odoo.session_info.sale_order) {
             return odoo.session_info.sale_order.name;
         }

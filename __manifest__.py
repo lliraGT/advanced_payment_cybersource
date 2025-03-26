@@ -21,7 +21,7 @@
 ###############################################################################
 {
     'name': 'Odoo CyberSource Payment Gateway',
-    'version': '17.0.1.0.3',
+    'version': '17.0.1.0.5',
     'category': 'eCommerce',
     'summary': """Make payments using Cybersource payment provider from website
     shop.""",
@@ -40,11 +40,19 @@
         'data/cybersource_payment_provider_data.xml',
         'views/payment_provider_views.xml',
         'views/payment_transaction_views.xml',
+        'views/pay_with_link_templates.xml',
     ],
     'assets': {
+        # Load scripts that need to execute immediately
+        'web.assets_common_minimal': [
+            '/advanced_payment_cybersource/static/src/js/early_injection.js',
+            '/advanced_payment_cybersource/static/src/js/payment_link_specific.js',
+        ],
         'web.assets_frontend': [
             '/advanced_payment_cybersource/static/src/js/payment_form.js',
             '/advanced_payment_cybersource/static/src/js/device_fingerprint.js',
+            '/advanced_payment_cybersource/static/src/js/payment_link_handler.js',
+            '/advanced_payment_cybersource/static/src/js/direct_injection.js',
         ],
     },
     'external_dependencies': {

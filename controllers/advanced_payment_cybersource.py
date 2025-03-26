@@ -32,6 +32,24 @@ class WebsiteSaleFormCyberSource(http.Controller):
         ], limit=1)
         return provider.cyber_merchant if provider else False
     
+    @http.route('/payment/cybersource/get_fingerprint_container', type='json', auth='public')
+    def get_fingerprint_container(self):
+        """Return HTML for fingerprint container to be inserted on payment pages"""
+        provider = request.env['payment.provider'].sudo().search([
+            ('code', '=', 'cybersource'),
+            ('state', '!=', 'disabled')
+        ], limit=1)
+        
+        if not provider:
+            return ""
+            
+        # Generate fingerprint container html
+        return """
+            <div id="cybersource_df_container" class="d-none">
+                <!-- Container for CyberSource device fingerprint -->
+            </div>
+        """
+    
     @http.route('/payment/cybersource/simulate_payment', type='json',
                 auth='public')
     def payment_with_flex_token(self, **post):
@@ -170,14 +188,35 @@ class WebsiteSaleFormCyberSource(http.Controller):
                     transaction_state = 'done'
                     _logger.info("Payment status: %s (mapped to done)", cybersource_status)
                 
+                # Try to find the transaction reference from payment link if applicable
+                transaction_reference = post.get('reference')
+                sale_order_id = None
+                if 'values' in post and 'sale_order_id' in post.get('values'):
+                    sale_order_id = post.get('values').get('sale_order_id')
+                
+                # If we have a sale_order_id but no reference, try to find the transaction
+                if not transaction_reference and sale_order_id:
+                    # Look up transaction by sale_order_id
+                    sale_order = request.env['sale.order'].sudo().browse(int(sale_order_id))
+                    if sale_order and sale_order.exists():
+                        # Get the associated transaction
+                        transaction = request.env['payment.transaction'].sudo().search([
+                            ('sale_order_ids', 'in', sale_order.id),
+                        ], limit=1)
+                        if transaction:
+                            transaction_reference = transaction.reference
+                            _logger.info("Found transaction reference %s from sale order %s", 
+                                        transaction_reference, sale_order_id)
+                
                 # Build the notification data
                 status_data = {
-                    'reference': post.get('reference'),
+                    'reference': transaction_reference,
                     'payment_details': post.get('customer_input')['card_num'],
                     'simulated_state': transaction_state,  # This is what Odoo will use
                     'cybersource_status': cybersource_status,  # Store the original status
                     'manual_capture': False,  # Set to True for manual capture if needed
                     'device_fingerprint': device_fingerprint,  # Store the device fingerprint
+                    'message': response_data.get('message', '')
                 }
                 
                 # Process the transaction with the data

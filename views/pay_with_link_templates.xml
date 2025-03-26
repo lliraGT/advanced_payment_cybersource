@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Add CyberSource fingerprinting directly to payment link templates -->
+    <template id="pay_with_cybersource" inherit_id="payment.pay">
+        <xpath expr="//div[hasclass('container')]" position="before">
+            <t t-if="providers and any(provider.code == 'cybersource' for provider in providers)">
+                <t t-set="sale_order_id" t-value="sale_order_id or ''"/>
+                <t t-set="fingerprint_date" t-value="datetime.date.today().strftime('%y%m%d')"/>
+                <t t-set="fingerprint" t-value="(fingerprint_date + str(sale_order_id))[:10].ljust(10, '0')"/>
+                
+                <!-- Get merchant ID from provider -->
+                <t t-set="cybersource_provider" t-value="request.env['payment.provider'].sudo().search([('code', '=', 'cybersource'), ('state', '!=', 'disabled')], limit=1)"/>
+                <t t-set="merchant_id" t-value="cybersource_provider.cyber_merchant or 'visanetgt_kani'"/>
+                
+                <!-- Hidden container for device fingerprint -->
+                <div id="cybersource_df_container" class="d-none">
+                    <iframe style="width: 100px; height: 100px; border: 0; position: absolute; top: -5000px;" 
+                            t-attf-src="https://h.online-metrix.net/fp/tags?org_id=1snn5n9w&amp;session_id={{merchant_id}}{{fingerprint}}">
+                    </iframe>
+                </div>
+                
+                <!-- Store fingerprint in window object -->
+                <script type="text/javascript">
+                    window.cybersourceFingerprint = "<t t-esc="fingerprint"/>";
+                    console.log("CyberSource fingerprint (server-side): <t t-esc="fingerprint"/>");
+                    
+                    // Add to localStorage if possible
+                    try {
+                        localStorage.setItem('cybersource_device_fingerprint', "<t t-esc="fingerprint"/>");
+                    } catch(e) {}
+                    
+                    // Add script tag
+                    var scriptTag = document.createElement('script');
+                    scriptTag.type = 'text/javascript';
+                    scriptTag.src = "https://h.online-metrix.net/fp/tags.js?org_id=1snn5n9w&amp;session_id=<t t-esc="merchant_id"/><t t-esc="fingerprint"/>";
+                    document.head.appendChild(scriptTag);
+                    
+                    // Ensure the fingerprint is available to the payment form
+                    document.addEventListener('DOMContentLoaded', function() {
+                        // Add fingerprint to payment forms
+                        const forms = document.querySelectorAll('form');
+                        forms.forEach(function(form) {
+                            let fingerprintField = form.querySelector('[name="device_fingerprint"], #customer_device_fingerprint');
+                            if (!fingerprintField) {
+                                fingerprintField = document.createElement('input');
+                                fingerprintField.type = 'hidden';
+                                fingerprintField.name = 'device_fingerprint';
+                                fingerprintField.id = 'customer_device_fingerprint';
+                                form.appendChild(fingerprintField);
+                            }
+                            fingerprintField.value = "<t t-esc="fingerprint"/>";
+                        });
+                    });
+                </script>
+            </t>
+        </xpath>
+    </template>
+</odoo>
