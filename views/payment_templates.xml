@@ -3,8 +3,7 @@
     <!-- Update the existing inline_form template to include device fingerprint script -->
     <template id="inline_form">
         <div t-attf-id="demo-container-{{provider_id}}">
-            <!-- Hidden field to store device fingerprint -->
-            <input type="hidden" name="device_fingerprint" id="customer_device_fingerprint" />
+            <!-- Remove the hardcoded hidden field - it will be added by JavaScript -->
             
             <div id="card_details">
                 <div class="mb-3">
@@ -13,30 +12,30 @@
                 </div>
                 <div class="col mt-0 mb-0">
                     <input type="text" t-ref="input_card_number" name="customer_input"
-                           id="customer_input_number" class="form-control"
-                           placeholder="XXXX XXXX XXXX XXXX" required="required"/>
+                        id="customer_input_number" class="form-control"
+                        placeholder="XXXX XXXX XXXX XXXX" required="required"/>
                 </div>
                 <br/>
                 <div class="col mt-0 mb-0">
                     <input type="text" name="customer_input" id="customer_input_name" 
-                           class="form-control" placeholder="Card Holder Name" required="required"/>
+                        class="form-control" placeholder="Card Holder Name" required="required"/>
                 </div>
                 <br/>
                 <div class="row">
                     <div class="col mt-0 mb-0">
                         <input type="text" t-ref="input" name="customer_input"
-                               id="customer_input_month" placeholder="Month"
-                               class="form-control customer_input_month" required="required"/>
+                            id="customer_input_month" placeholder="Month"
+                            class="form-control customer_input_month" required="required"/>
                     </div>
                     <div class="col mt-0 mb-0">
                         <input type="text" name="customer_input" id="customer_input_year"
-                               class="form-control" placeholder="Year" required="required"/>
+                            class="form-control" placeholder="Year" required="required"/>
                     </div>
                 </div>
                 <br/>
                 <div class="col mt-0 mb-0" id="card-cvv">
                     <input type="password" name="customer_input" id="customer_input_cvv"
-                           class="form-control" placeholder="CVV"/>
+                        class="form-control" placeholder="CVV"/>
                 </div>
             </div>
         </div>

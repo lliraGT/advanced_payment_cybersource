@@ -2,6 +2,7 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import ValidationError
 import logging
+import json
 
 _logger = logging.getLogger(__name__)
 
@@ -18,6 +19,8 @@ class PaymentTransaction(models.Model):
                                               help="Message returned by CyberSource API")
     cybersource_device_fingerprint = fields.Char(string="Device Fingerprint",
                                                help="Device fingerprint ID used for fraud detection")
+    cybersource_approval_code = fields.Char(string="CyberSource Approval Code",
+                                          help="Approval code returned by CyberSource")
 
     def action_cybersource_set_done(self):
         """ Set the state of the transaction to 'done'."""
@@ -82,6 +85,11 @@ class PaymentTransaction(models.Model):
             self.cybersource_device_fingerprint = notification_data.get('device_fingerprint')
             _logger.info("Stored device fingerprint: %s", self.cybersource_device_fingerprint)
         
+        # Store approval code if provided
+        if notification_data.get('approval_code'):
+            self.cybersource_approval_code = notification_data.get('approval_code')
+            _logger.info("Stored approval code: %s", self.cybersource_approval_code)
+        
         # Log transaction details for debugging
         _logger.info(
             "Processing CyberSource transaction %s with state: %s, status: %s", 
@@ -122,3 +130,18 @@ class PaymentTransaction(models.Model):
                 state, self.reference
             )
             self._set_error(_("Unexpected payment status"))
+    
+    def _create_payment(self, **values):
+        """Override to add approval code to payment reference"""
+        payment = super()._create_payment(**values)
+        
+        # Only modify payments for CyberSource transactions that have an approval code
+        if self.provider_code == 'cybersource' and self.cybersource_approval_code:
+            # Update the payment reference with the CyberSource approval code
+            payment.write({
+                'ref': self.cybersource_approval_code
+            })
+            _logger.info("Updated payment %s with CyberSource approval code: %s", 
+                payment.id, self.cybersource_approval_code)
+            
+        return payment

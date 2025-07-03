@@ -19,7 +19,7 @@
 #    If not, see <http://www.gnu.org/licenses/>.
 #
 ###############################################################################
-from odoo import api, models
+from odoo import api, models # type: ignore
 
 
 class AccountPaymentMethod(models.Model):

@@ -37,6 +37,9 @@ paymentForm.include({
     /**
      * Override to handle CyberSource redirect flow
      */
+    // Modify static/src/js/payment_form.js 
+    // Update the _processRedirectFlow method to better handle mobile cases:
+
     _processRedirectFlow(providerCode, paymentOptionId, paymentMethodCode, processingValues) {
         if (providerCode !== 'cybersource') {
             return this._super(...arguments);
@@ -96,34 +99,49 @@ paymentForm.include({
             if (orderParam) {
                 values.sale_order_id = orderParam;
             }
-            
-            // Get the merchant ID
-            jsonrpc('/payment/cybersource/get_merchant_id').then(merchant_id => {
-                if (merchant_id) {
-                    values.merchant_id = merchant_id;
-                }
-            }).catch(err => {
-                console.error("Failed to get merchant ID:", err);
-            });
         }
         
-        // Process the payment
-        return jsonrpc(
-            '/payment/cybersource/simulate_payment',
-            {
-                'reference': processingValues.reference,
-                'customer_input': {
-                    'exp_year': expYear,
-                    'exp_month': expMonth,
-                    'name': customerInputName,
-                    'card_num': customerInputNumber,
-                    'cvv': cvv,
-                    'device_fingerprint': deviceFingerprint
+        // Get merchant ID first
+        return jsonrpc('/payment/cybersource/get_merchant_id')
+        .then(merchant_id => {
+            if (merchant_id) {
+                values.merchant_id = merchant_id;
+            }
+            
+            // Show loading indicator for mobile
+            if (/Mobi|Android/i.test(navigator.userAgent)) {
+                // Simple mobile detection
+                $('body').append('<div id="payment_processing" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center;"><div>Processing payment...</div></div>');
+            }
+            
+            // Process the payment
+            return jsonrpc(
+                '/payment/cybersource/simulate_payment',
+                {
+                    'reference': processingValues.reference,
+                    'customer_input': {
+                        'exp_year': expYear,
+                        'exp_month': expMonth,
+                        'name': customerInputName,
+                        'card_num': customerInputNumber,
+                        'cvv': cvv,
+                        'device_fingerprint': deviceFingerprint
+                    },
+                    'values': values,
                 },
-                'values': values,
-            },
-        ).then(() => window.location = '/payment/status')
+            );
+        })
+        .then(() => {
+            // Remove loading indicator if it exists
+            $('#payment_processing').remove();
+            
+            // Redirect to status page
+            window.location = '/payment/status';
+        })
         .catch(error => {
+            // Remove loading indicator if it exists
+            $('#payment_processing').remove();
+            
             console.error("Payment processing error:", error);
             this._displayErrorDialog(
                 _t("Payment Error"),

@@ -46,13 +46,14 @@
         # Load scripts that need to execute immediately
         'web.assets_common_minimal': [
             '/advanced_payment_cybersource/static/src/js/early_injection.js',
-            '/advanced_payment_cybersource/static/src/js/payment_link_specific.js',
+            #'/advanced_payment_cybersource/static/src/js/payment_link_specific.js',
         ],
         'web.assets_frontend': [
             '/advanced_payment_cybersource/static/src/js/payment_form.js',
-            '/advanced_payment_cybersource/static/src/js/device_fingerprint.js',
-            '/advanced_payment_cybersource/static/src/js/payment_link_handler.js',
-            '/advanced_payment_cybersource/static/src/js/direct_injection.js',
+            #'/advanced_payment_cybersource/static/src/js/device_fingerprint.js',
+            #'/advanced_payment_cybersource/static/src/js/payment_link_handler.js',
+            #'/advanced_payment_cybersource/static/src/js/direct_injection.js',
+            '/advanced_payment_cybersource/static/src/js/consolidated_device_fingerprint.js',
         ],
     },
     'external_dependencies': {
