@@ -74,7 +74,17 @@ class PaymentTransaction(models.Model):
         if self.provider_code != 'cybersource':
             return
             
-        self.provider_reference = f'cybersource-{self.reference}'
+        # Get approval code from notification data
+        approval_code = notification_data.get('approval_code', '')
+        
+        # Set provider_reference to the approval code if available, otherwise use default format
+        if approval_code:
+            self.provider_reference = approval_code
+            _logger.info("Set provider_reference to approval code: %s for transaction %s", 
+                        approval_code, self.reference)
+        else:
+            self.provider_reference = f'cybersource-{self.reference}'
+            _logger.info("Set provider_reference to default format: cybersource-%s", self.reference)
         
         # Store CyberSource specific data
         self.cybersource_response_code = notification_data.get('cybersource_status', '')
@@ -86,16 +96,17 @@ class PaymentTransaction(models.Model):
             _logger.info("Stored device fingerprint: %s", self.cybersource_device_fingerprint)
         
         # Store approval code if provided
-        if notification_data.get('approval_code'):
-            self.cybersource_approval_code = notification_data.get('approval_code')
+        if approval_code:
+            self.cybersource_approval_code = approval_code
             _logger.info("Stored approval code: %s", self.cybersource_approval_code)
         
         # Log transaction details for debugging
         _logger.info(
-            "Processing CyberSource transaction %s with state: %s, status: %s", 
+            "Processing CyberSource transaction %s with state: %s, status: %s, approval_code: %s", 
             self.reference,
             notification_data.get('simulated_state', ''),
-            notification_data.get('cybersource_status', '')
+            notification_data.get('cybersource_status', ''),
+            approval_code
         )
         
         # Process based on the simulated_state sent from the controller

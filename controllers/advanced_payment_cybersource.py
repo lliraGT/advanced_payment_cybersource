@@ -219,6 +219,12 @@ class WebsiteSaleFormCyberSource(http.Controller):
                 # Parse the response body
                 response_data = json.loads(body) if body else {}
                 
+                # Extract approval code from processor information
+                approval_code = ""
+                if 'processorInformation' in response_data and 'approvalCode' in response_data['processorInformation']:
+                    approval_code = response_data['processorInformation']['approvalCode']
+                    _logger.info("Extracted approval code from CyberSource response: %s", approval_code)
+                
                 # According to CyberSource API docs, HTTP 201 with status AUTHORIZED is a successful transaction
                 if status == 201:
                     # Get CyberSource status
@@ -275,7 +281,8 @@ class WebsiteSaleFormCyberSource(http.Controller):
                         'cybersource_status': cybersource_status,
                         'manual_capture': False,
                         'device_fingerprint': device_fingerprint,
-                        'message': response_data.get('message', '')
+                        'message': response_data.get('message', ''),
+                        'approval_code': approval_code  # Add approval code to notification data
                     }
                     
                     # Process the transaction with the data
