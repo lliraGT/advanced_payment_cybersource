@@ -54,38 +54,42 @@ class WebsiteSaleFormCyberSource(http.Controller):
                 auth='public')
     def payment_with_flex_token(self, **post):
         """ This is used for Payment processing using the flex token """
+        _logger.info("=== CyberSource Payment Processing Started ===")
+        _logger.info("Request user: %s (ID: %s)", request.env.user.name, request.env.user.id)
         try:
             # Get partner information with proper access control
+            # Enhanced partner and sale order handling for guest users
             partner_id = post.get('values', {}).get('partner')
-            if partner_id:
-                try:
-                    # Try to access partner with sudo if public user
-                    address = request.env['res.partner'].sudo().browse(partner_id)
-                    # Verify the partner exists and we can access it
-                    if not address.exists():
-                        raise ValidationError(_("Partner not found"))
-                except Exception as e:
-                    _logger.warning("Could not access partner %s: %s", partner_id, e)
-                    # Create a default address if we can't access the partner
-                    address = request.env['res.partner'].sudo().create({
-                        'name': 'Payment Customer',
-                        'email': 'payment@example.com',
-                        'street': 'Default Address',
-                        'city': 'Default City',
-                        'zip': '00000',
-                        'country_id': request.env.ref('base.gt').id,  # Guatemala
-                        'state_id': request.env.ref('base.state_gt_01').id if request.env.ref('base.state_gt_01', False) else False,
-                    })
-            else:
-                # Create default partner if none provided
-                address = request.env['res.partner'].sudo().create({
-                    'name': 'Payment Customer',
-                    'email': 'payment@example.com',
-                    'street': 'Default Address',
-                    'city': 'Default City',
-                    'zip': '00000',
-                    'country_id': request.env.ref('base.gt').id,
-                })
+            sale_order_id = post.get('values', {}).get('sale_order_id')
+            
+            _logger.info("Processing payment - partner_id: %s, sale_order_id: %s", partner_id, sale_order_id)
+            
+            # Get partner with safe access
+            address = self._safe_partner_access(partner_id)
+            
+            # Try to get better partner info from sale order if available
+            if sale_order_id:
+                sale_order = self._safe_sale_order_access(sale_order_id)
+                if sale_order and sale_order.partner_id:
+                    # Use partner from sale order for more accurate data
+                    order_partner = sale_order.partner_id
+                    try:
+                        # Test if we can access this partner
+                        _ = order_partner.name
+                        address = order_partner
+                        _logger.info("Using partner from sale order: %s (ID: %s)", address.name, address.id)
+                    except:
+                        # If can't access order partner, use sudo
+                        address = order_partner.sudo()
+                        _logger.info("Using partner from sale order with sudo: %s (ID: %s)", address.name, address.id)
+            
+            # Ensure we have a working address object
+            if not address:
+                _logger.warning("No valid address found, creating guest partner")
+                address = self._create_guest_partner()
+            
+            # For safety, always use sudo() when accessing partner fields for billing info
+            address_safe = address.sudo()
             
             client_reference_information = Ptsv2paymentsClientReferenceInformation(
                 code=post.get('reference'))
@@ -133,16 +137,17 @@ class WebsiteSaleFormCyberSource(http.Controller):
                 total_amount=post.get('values')['amount'],
                 currency=currency_code)
                     
+            # Safe billing information access using sudo to avoid ACL issues
             order_information_bill_to = Ptsv2paymentsOrderInformationBillTo(
-                first_name=address.name.split(' ')[0] if len(address.name.split(' ')) > 0 else address.name,
-                last_name=address.name.split(' ')[1] if len(address.name.split(' ')) > 1 else '',
-                address1=address.street or 'Default Address',
-                locality=address.city or 'Guatemala',
-                administrative_area=address.state_id.code if address.state_id else "01",
-                postal_code=address.zip or '01007',
-                country=address.country_id.code if address.country_id else "GT",
-                email=address.email or 'payment@example.com',
-                phone_number=address.phone or '12345678')
+                first_name=address_safe.name.split(' ')[0] if address_safe.name and len(address_safe.name.split(' ')) > 0 else 'Guest',
+                last_name=address_safe.name.split(' ')[1] if address_safe.name and len(address_safe.name.split(' ')) > 1 else 'Customer',
+                address1=address_safe.street or 'Guest Address',
+                locality=address_safe.city or 'Guatemala',
+                administrative_area=address_safe.state_id.code if address_safe.state_id else "01",
+                postal_code=address_safe.zip or '01007',
+                country=address_safe.country_id.code if address_safe.country_id else "GT",
+                email=address_safe.email or 'payment.guest@example.com',
+                phone_number=address_safe.phone or '12345678')
                 
             order_information = Ptsv2paymentsOrderInformation(
                 amount_details=order_information_amount_details.__dict__,
@@ -369,3 +374,99 @@ class WebsiteSaleFormCyberSource(http.Controller):
             elif isinstance(value, dict):
                 self.del_none(value)
         return data
+    
+    def _safe_partner_access(self, partner_id):
+        """Safely access partner with fallback for guest users"""
+        if not partner_id:
+            return self._create_guest_partner()
+            
+        try:
+            # Try normal access first
+            partner = request.env['res.partner'].browse(partner_id)
+            # Test access by reading a field
+            _ = partner.name
+            if partner.exists():
+                _logger.info("Partner %s accessed successfully with normal permissions", partner_id)
+                return partner
+        except Exception as e:
+            _logger.warning("Normal partner access failed for ID %s: %s", partner_id, e)
+        
+        try:
+            # Fallback to sudo access
+            partner = request.env['res.partner'].sudo().browse(partner_id)
+            if partner.exists():
+                _logger.info("Partner %s accessed with sudo permissions", partner_id)
+                return partner
+        except Exception as e:
+            _logger.error("Sudo partner access also failed for ID %s: %s", partner_id, e)
+        
+        # Last resort: create guest partner
+        return self._create_guest_partner()
+
+    def _safe_sale_order_access(self, sale_order_id):
+        """Safely access sale order with fallback for guest users"""
+        if not sale_order_id:
+            return None
+            
+        try:
+            # Try normal access first
+            order = request.env['sale.order'].browse(int(sale_order_id))
+            # Test access
+            _ = order.name
+            if order.exists():
+                _logger.info("Sale order %s accessed with normal permissions", sale_order_id)
+                return order
+        except Exception as e:
+            _logger.warning("Normal sale order access failed for ID %s: %s", sale_order_id, e)
+        
+        try:
+            # Fallback to sudo access
+            order = request.env['sale.order'].sudo().browse(int(sale_order_id))
+            if order.exists():
+                _logger.info("Sale order %s accessed with sudo permissions", sale_order_id)
+                return order
+        except Exception as e:
+            _logger.error("Sudo sale order access failed for ID %s: %s", sale_order_id, e)
+        
+        return None
+
+    def _create_guest_partner(self):
+        """Create a default guest partner for ACL-restricted scenarios"""
+        try:
+            # Check if guest partner already exists
+            guest_partner = request.env['res.partner'].sudo().search([
+                ('name', '=', 'Payment Guest'),
+                ('email', '=', 'payment.guest@example.com')
+            ], limit=1)
+            
+            if guest_partner:
+                return guest_partner
+            
+            # Create new guest partner
+            partner_data = {
+                'name': 'Payment Guest',
+                'email': 'payment.guest@example.com',
+                'street': 'Guest Address',
+                'city': 'Guatemala',
+                'zip': '01007',
+                'country_id': request.env.ref('base.gt').id,
+                'is_company': False,
+                'customer_rank': 1,
+            }
+            
+            # Try to set state if Guatemala state exists
+            try:
+                guatemala_state = request.env.ref('base.state_gt_01')
+                if guatemala_state:
+                    partner_data['state_id'] = guatemala_state.id
+            except:
+                pass
+            
+            guest_partner = request.env['res.partner'].sudo().create(partner_data)
+            _logger.info("Created guest partner with ID %s", guest_partner.id)
+            return guest_partner
+            
+        except Exception as e:
+            _logger.error("Failed to create guest partner: %s", e)
+            # Return admin partner as absolute fallback
+            return request.env['res.partner'].sudo().browse(1)
