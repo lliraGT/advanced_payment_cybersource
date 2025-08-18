@@ -58,30 +58,44 @@ class WebsiteSaleFormCyberSource(http.Controller):
         _logger.info("Request user: %s (ID: %s)", request.env.user.name, request.env.user.id)
         try:
             # Get partner information with proper access control
+            
+            ########################################### --Cambios 04082025
             # Enhanced partner and sale order handling for guest users
             partner_id = post.get('values', {}).get('partner')
             sale_order_id = post.get('values', {}).get('sale_order_id')
+            reference = post.get('reference')
             
-            _logger.info("Processing payment - partner_id: %s, sale_order_id: %s", partner_id, sale_order_id)
+            _logger.info("Processing payment - partner_id: %s, sale_order_id: %s, reference: %s", 
+                        partner_id, sale_order_id, reference)
             
-            # Get partner with safe access
-            address = self._safe_partner_access(partner_id)
+            # Determine if this is an invoice payment vs sale order payment
+            is_invoice_payment = not sale_order_id and reference and 'FEL' in reference
             
-            # Try to get better partner info from sale order if available
-            if sale_order_id:
-                sale_order = self._safe_sale_order_access(sale_order_id)
-                if sale_order and sale_order.partner_id:
-                    # Use partner from sale order for more accurate data
-                    order_partner = sale_order.partner_id
-                    try:
-                        # Test if we can access this partner
-                        _ = order_partner.name
-                        address = order_partner
-                        _logger.info("Using partner from sale order: %s (ID: %s)", address.name, address.id)
-                    except:
-                        # If can't access order partner, use sudo
-                        address = order_partner.sudo()
-                        _logger.info("Using partner from sale order with sudo: %s (ID: %s)", address.name, address.id)
+            if is_invoice_payment:
+                # Handle invoice payments specifically
+                address = self._handle_invoice_payment_partner(partner_id, reference)
+                
+                # Try to get additional data from the invoice
+                invoice = self._get_invoice_from_reference(reference)
+                if invoice and invoice.partner_id:
+                    address = invoice.partner_id.sudo()
+                    _logger.info("Using partner from invoice: %s (ID: %s)", address.name, address.id)
+            else:
+                # Handle regular sale order payments (your existing logic)
+                address = self._safe_partner_access(partner_id)
+                
+                # Try to get better partner info from sale order if available
+                if sale_order_id:
+                    sale_order = self._safe_sale_order_access(sale_order_id)
+                    if sale_order and sale_order.partner_id:
+                        order_partner = sale_order.partner_id
+                        try:
+                            _ = order_partner.name
+                            address = order_partner
+                            _logger.info("Using partner from sale order: %s (ID: %s)", address.name, address.id)
+                        except:
+                            address = order_partner.sudo()
+                            _logger.info("Using partner from sale order with sudo: %s (ID: %s)", address.name, address.id)
             
             # Ensure we have a working address object
             if not address:
@@ -90,6 +104,40 @@ class WebsiteSaleFormCyberSource(http.Controller):
             
             # For safety, always use sudo() when accessing partner fields for billing info
             address_safe = address.sudo()
+            ########################################## --Fin 04082025
+            
+            # Enhanced partner and sale order handling for guest users
+            #partner_id = post.get('values', {}).get('partner')
+            #sale_order_id = post.get('values', {}).get('sale_order_id')
+            
+            #_logger.info("Processing payment - partner_id: %s, sale_order_id: %s", partner_id, sale_order_id)
+            
+            # Get partner with safe access
+            #address = self._safe_partner_access(partner_id)
+            
+            # Try to get better partner info from sale order if available
+            #if sale_order_id:
+            #    sale_order = self._safe_sale_order_access(sale_order_id)
+            #    if sale_order and sale_order.partner_id:
+                    # Use partner from sale order for more accurate data
+            #        order_partner = sale_order.partner_id
+            #        try:
+                        # Test if we can access this partner
+            #            _ = order_partner.name
+            #            address = order_partner
+            #            _logger.info("Using partner from sale order: %s (ID: %s)", address.name, address.id)
+            #        except:
+                        # If can't access order partner, use sudo
+            #            address = order_partner.sudo()
+            #            _logger.info("Using partner from sale order with sudo: %s (ID: %s)", address.name, address.id)
+            
+            # Ensure we have a working address object
+            #if not address:
+            #    _logger.warning("No valid address found, creating guest partner")
+            #    address = self._create_guest_partner()
+            
+            # For safety, always use sudo() when accessing partner fields for billing info
+            #address_safe = address.sudo()
             
             client_reference_information = Ptsv2paymentsClientReferenceInformation(
                 code=post.get('reference'))
@@ -255,19 +303,16 @@ class WebsiteSaleFormCyberSource(http.Controller):
                         transaction_state = 'done'
                         _logger.info("Payment status: %s (mapped to done)", cybersource_status)
                     
-                    # Try to find the transaction reference from payment link if applicable
+                    ################################### --Cambios 04082025
+                    # Try to find the transaction reference
                     transaction_reference = post.get('reference')
-                    sale_order_id = None
-                    if 'values' in post and 'sale_order_id' in post.get('values'):
-                        sale_order_id = post.get('values').get('sale_order_id')
                     
-                    # If we have a sale_order_id but no reference, try to find the transaction
+                    # Handle different transaction types
                     if not transaction_reference and sale_order_id:
+                        # Sale order payment - existing logic
                         try:
-                            # Look up transaction by sale_order_id with sudo
                             sale_order = request.env['sale.order'].sudo().browse(int(sale_order_id))
                             if sale_order and sale_order.exists():
-                                # Get the associated transaction
                                 transaction = request.env['payment.transaction'].sudo().search([
                                     ('sale_order_ids', 'in', sale_order.id),
                                 ], limit=1)
@@ -277,6 +322,44 @@ class WebsiteSaleFormCyberSource(http.Controller):
                                                 transaction_reference, sale_order_id)
                         except Exception as e:
                             _logger.warning("Could not access sale order %s: %s", sale_order_id, e)
+                    
+                    elif transaction_reference and 'FEL' in transaction_reference:
+                        # Invoice payment - verify the transaction exists
+                        try:
+                            transaction = request.env['payment.transaction'].sudo().search([
+                                ('reference', '=', transaction_reference),
+                                ('provider_code', '=', 'cybersource')
+                            ], limit=1)
+                            if not transaction:
+                                _logger.warning("No CyberSource transaction found for reference %s", transaction_reference)
+                            else:
+                                _logger.info("Verified invoice payment transaction %s exists", transaction_reference)
+                        except Exception as e:
+                            _logger.warning("Could not verify transaction %s: %s", transaction_reference, e)
+                    ################################### --Fin 04082025
+                    
+                    # Try to find the transaction reference from payment link if applicable
+                    #transaction_reference = post.get('reference')
+                    #sale_order_id = None
+                    #if 'values' in post and 'sale_order_id' in post.get('values'):
+                    #    sale_order_id = post.get('values').get('sale_order_id')
+                    
+                    # If we have a sale_order_id but no reference, try to find the transaction
+                    #if not transaction_reference and sale_order_id:
+                    #    try:
+                            # Look up transaction by sale_order_id with sudo
+                    #        sale_order = request.env['sale.order'].sudo().browse(int(sale_order_id))
+                    #        if sale_order and sale_order.exists():
+                                # Get the associated transaction
+                    #            transaction = request.env['payment.transaction'].sudo().search([
+                    #                ('sale_order_ids', 'in', sale_order.id),
+                    #            ], limit=1)
+                    #            if transaction:
+                    #                transaction_reference = transaction.reference
+                    #                _logger.info("Found transaction reference %s from sale order %s", 
+                    #                            transaction_reference, sale_order_id)
+                    #    except Exception as e:
+                    #        _logger.warning("Could not access sale order %s: %s", sale_order_id, e)
                     
                     # Build the notification data
                     status_data = {
@@ -429,6 +512,72 @@ class WebsiteSaleFormCyberSource(http.Controller):
             _logger.error("Sudo sale order access failed for ID %s: %s", sale_order_id, e)
         
         return None
+    
+    ######################### --Cambios 04082025
+    def _handle_invoice_payment_partner(self, partner_id, reference):
+        """Handle partner access specifically for invoice payments"""
+        _logger.info("Handling invoice payment for partner_id: %s, reference: %s", partner_id, reference)
+        
+        # For invoice payments, we need to handle partner access differently
+        if partner_id:
+            try:
+                # Try normal access first
+                partner = request.env['res.partner'].browse(partner_id)
+                _ = partner.name  # Test access
+                if partner.exists():
+                    _logger.info("Invoice payment: Partner %s accessed with normal permissions", partner_id)
+                    return partner
+            except Exception as e:
+                _logger.warning("Invoice payment: Normal partner access failed for ID %s: %s", partner_id, e)
+            
+            try:
+                # Fallback to sudo access
+                partner = request.env['res.partner'].sudo().browse(partner_id)
+                if partner.exists():
+                    _logger.info("Invoice payment: Partner %s accessed with sudo permissions", partner_id)
+                    return partner
+            except Exception as e:
+                _logger.error("Invoice payment: Sudo partner access failed for ID %s: %s", partner_id, e)
+        
+        # For invoice payments without proper partner access, try to get partner from the reference
+        if reference and 'FEL' in reference:
+            try:
+                # Try to find the invoice by reference and get the partner
+                invoice = request.env['account.move'].sudo().search([
+                    ('name', '=', reference),
+                    ('move_type', 'in', ['out_invoice', 'out_refund'])
+                ], limit=1)
+                
+                if invoice and invoice.partner_id:
+                    _logger.info("Found partner from invoice reference: %s", invoice.partner_id.name)
+                    return invoice.partner_id
+            except Exception as e:
+                _logger.warning("Could not find invoice for reference %s: %s", reference, e)
+        
+        # Last resort: create guest partner
+        return self._create_guest_partner()
+
+    def _get_invoice_from_reference(self, reference):
+        """Get invoice from reference for better data handling"""
+        if not reference:
+            return None
+            
+        try:
+            # Search for invoice by name/reference
+            invoice = request.env['account.move'].sudo().search([
+                ('name', '=', reference),
+                ('move_type', 'in', ['out_invoice', 'out_refund'])
+            ], limit=1)
+            
+            if invoice:
+                _logger.info("Found invoice %s for reference %s", invoice.id, reference)
+                return invoice
+        except Exception as e:
+            _logger.warning("Could not find invoice for reference %s: %s", reference, e)
+        
+        return None
+    
+    ####################### --Fin 04082025
 
     def _create_guest_partner(self):
         """Create a default guest partner for ACL-restricted scenarios"""
